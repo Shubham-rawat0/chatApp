@@ -43,9 +43,11 @@ const io = new socket_io_1.Server(server, {
 //   res.send("hello")
 // })
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
+server
+    .listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);
-}).on("error", (err) => {
+})
+    .on("error", (err) => {
     console.error("Server failed to start:", err);
     process.exit(1);
 });

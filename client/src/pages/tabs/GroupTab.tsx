@@ -3,91 +3,73 @@ import { useAuth } from "@clerk/clerk-react";
 import axios from "axios";
 import Loading from "../../components/Loading";
 
-interface Group {
+interface RoomMember {
   id: string;
-  name: string;
-  profileUrl?: string; // Group avatar
+  name?: string;
+  username?: string;
+  profileUrl?: string;
 }
 
-interface Message {
-  id?: string;
-  senderId: string; // 'me' or user id
+interface ChatMessage {
+  id: string;
   text: string;
-  createdAt?: string;
-  senderProfileUrl?: string; // sender's avatar
+  senderId: string;
+  createdAt: string;
+  sender?: RoomMember;
 }
 
-interface GroupChat {
-  groupId: string;
-  messages: Message[];
+interface Room {
+  id: string;
+  roomName?: string;
+  createdById: string;
+  createdAt: string;
+  chats: ChatMessage[];
 }
 
-const CURRENT_USER_ID = "me";
-const CURRENT_USER_PROFILE_URL = "/defaultPfp.jpeg"; // current user avatar
+interface Group {
+  room: Room;
+  members: RoomMember[];
+}
 
 const GroupTab = () => {
+  const { getToken, isLoaded } = useAuth();
   const [groups, setGroups] = useState<Group[]>([]);
-  const [groupChats, setGroupChats] = useState<GroupChat[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
   const [messageInput, setMessageInput] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const { getToken, isLoaded } = useAuth();
+  const currentUserId = "me"; // Map to Clerk userId later
 
-  // Fetch groups & chats
+  // Fetch groups
   useEffect(() => {
     const fetchGroups = async () => {
       if (!isLoaded) return;
+
       setIsLoading(true);
       try {
         const token = await getToken();
-        if (!token) throw new Error("No token, please login again");
+        if (!token) throw new Error("No token found");
 
         const res = await axios.get(
           `${import.meta.env.VITE_BACKEND_URL}/user/getGroups`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          }
+          { headers: { Authorization: `Bearer ${token}` } }
         );
 
-        const groupsData = (res.data.groups || []).filter(
-          (g: any) => g && typeof g === "object"
-        );
-        let chatsData = res.data.groupChats || [];
+        const roomsData: Group[] = Array.isArray(res.data)
+          ? res.data
+          : res.data.groups || [];
 
-        chatsData = chatsData
-          .filter((c: any) => c && typeof c === "object")
-          .map((c: any) => ({
-            groupId: c.groupId,
-            messages: Array.isArray(c.messages) ? c.messages : [],
-          }));
+        setGroups(roomsData);
 
-        setGroups(groupsData);
-        setGroupChats(chatsData);
-
-        // Select latest group by last message timestamp
-        if (groupsData.length > 0) {
-          const latestGroupData = chatsData
-            .map((c: any) => {
-              const lastMsg = Array.isArray(c.messages)
-                ? c.messages.slice(-1)[0]
-                : null;
-              return {
-                groupId: c.groupId,
-                lastMsgTime: lastMsg?.createdAt
-                  ? new Date(lastMsg.createdAt).getTime()
-                  : 0,
-              };
-            })
-            .sort((a: any, b: any) => b.lastMsgTime - a.lastMsgTime)[0];
-
-          const initialGroup =
-            latestGroupData &&
-            groupsData.find((g: any) => g.id === latestGroupData.groupId);
-
-          setSelectedGroup(initialGroup || groupsData[0] || null);
+        // Auto-select most recent room
+        if (roomsData.length > 0) {
+          const sorted = [...roomsData].sort((a, b) => {
+            const lastA = a.room.chats?.slice(-1)[0]?.createdAt || 0;
+            const lastB = b.room.chats?.slice(-1)[0]?.createdAt || 0;
+            return new Date(lastB).getTime() - new Date(lastA).getTime();
+          });
+          setSelectedGroup(sorted[0]);
         }
 
         setError(null);
@@ -102,36 +84,44 @@ const GroupTab = () => {
     fetchGroups();
   }, [getToken, isLoaded]);
 
-  // Update messages when group changes
-  useEffect(() => {
-    if (!selectedGroup) return;
-    const chat = groupChats.find((c) => c.groupId === selectedGroup.id);
-    setMessages(chat?.messages || []);
-  }, [selectedGroup, groupChats]);
-
   // Send group message
   const sendMessage = async () => {
     if (!messageInput.trim() || !selectedGroup) return;
 
     try {
       const token = await getToken();
-      if (!token) throw new Error("No token, please login again");
-
-      const newMessage: Message = {
-        senderId: CURRENT_USER_ID,
-        text: messageInput,
-        id: Math.random().toString(),
-        createdAt: new Date().toISOString(),
-        senderProfileUrl: CURRENT_USER_PROFILE_URL,
-      };
+      if (!token) throw new Error("No token found");
 
       await axios.post(
         `${import.meta.env.VITE_BACKEND_URL}/chat/sendGroup`,
-        { groupId: selectedGroup.id, text: messageInput },
+        {
+          groupId: selectedGroup.room.id,
+          text: messageInput,
+        },
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      setMessages((prev) => [...prev, newMessage]);
+      // Update local state
+      setSelectedGroup((prev) =>
+        prev
+          ? {
+              ...prev,
+              room: {
+                ...prev.room,
+                chats: [
+                  ...prev.room.chats,
+                  {
+                    id: Math.random().toString(),
+                    senderId: currentUserId,
+                    text: messageInput,
+                    createdAt: new Date().toISOString(),
+                  },
+                ],
+              },
+            }
+          : prev
+      );
+
       setMessageInput("");
     } catch (err) {
       console.error(err);
@@ -141,150 +131,155 @@ const GroupTab = () => {
   if (isLoading) return <Loading />;
   if (error)
     return (
-      <div className="text-red-300 p-4 rounded-xl bg-red-900/40 backdrop-blur-md border border-red-700/50">
+      <div className="text-red-400 p-4 rounded-xl bg-red-900/40 border border-red-600">
         {error}
       </div>
     );
 
   return (
-    <div className="flex flex-col md:flex-row w-full h-[80vh] min-h-[500px] bg-gray-900/20 backdrop-blur-md p-4 rounded-3xl gap-4 shadow-2xl text-white">
-      {/* Groups List (Sidebar) */}
-      <div className="w-full md:w-1/3 min-w-[250px] bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl p-3 overflow-y-auto flex flex-col gap-2 shadow-inner">
-        <h2 className="text-xl font-bold mb-3 px-1 text-white/90">Groups</h2>
-        {groups.map((group) => {
-          const chat = groupChats.find((c) => c.groupId === group.id);
-          const lastMsg = Array.isArray(chat?.messages)
-            ? chat.messages.slice(-1)[0]?.text || "No recent messages"
-            : "No recent messages";
+    <div className="flex w-full h-[80vh] bg-gray-900/20 rounded-3xl overflow-hidden text-white">
+      {/* LEFT SIDEBAR */}
+      <div className="w-1/3 bg-gray-800/60 border-r border-gray-700 flex flex-col">
+        <div className="p-4 text-xl font-semibold border-b border-gray-700">
+          Groups
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {groups.map((group) => {
+            const lastMsg =
+              group.room.chats?.slice(-1)[0]?.text || "No recent messages";
 
-          const isSelected = selectedGroup?.id === group.id;
+            const groupName =
+              group.room.roomName ||
+              group.members.map((m) => m.name || m.username).join(", ") ||
+              "Unnamed Group";
 
-          return (
-            <div
-              key={group.id}
-              onClick={() => setSelectedGroup(group)}
-              className={`cursor-pointer w-full flex items-center gap-3 p-3 rounded-xl transition-all duration-200 ${
-                isSelected
-                  ? "bg-white/30 border border-white/40 shadow-lg"
-                  : "hover:bg-white/10"
-              }`}
-            >
-              <img
-                src={
-                  group.profileUrl ||
-                  "https://via.placeholder.com/40/808080/FFFFFF?text=G"
-                }
-                alt={`${group.name}'s avatar`}
-                className="w-10 h-10 rounded-full object-cover border border-white/50"
-              />
-              <div className="flex flex-col flex-1 overflow-hidden">
-                <div className="font-semibold text-white/95">{group.name}</div>
-                <div className="text-sm text-white/70 truncate">{lastMsg}</div>
+            const profileUrl =
+              group.members[0]?.profileUrl ||
+              "https://via.placeholder.com/40/808080/FFFFFF?text=G";
+
+            const isSelected = selectedGroup?.room.id === group.room.id;
+
+            return (
+              <div
+                key={group.room.id}
+                onClick={() => setSelectedGroup(group)}
+                className={`flex items-center gap-3 p-3 cursor-pointer transition-all ${
+                  isSelected ? "bg-gray-700/70" : "hover:bg-gray-700/40"
+                }`}
+              >
+                <img
+                  src={profileUrl}
+                  alt="group"
+                  className="w-10 h-10 rounded-full object-cover border border-white/30"
+                />
+                <div className="flex flex-col">
+                  <div className="font-semibold">{groupName}</div>
+                  <div className="text-sm text-gray-300 truncate w-40">
+                    {lastMsg}
+                  </div>
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
 
-      {/* Chat Box */}
-      <div className="flex-1 relative flex flex-col bg-white/15 backdrop-blur-2xl border border-white/30 rounded-2xl shadow-xl overflow-hidden">
-        {/* Chat Header */}
-        {selectedGroup && (
-          <div className="p-4 border-b border-white/30 bg-white/10 backdrop-blur-md flex items-center gap-3 shadow-md">
-            <img
-              src={
-                selectedGroup.profileUrl ||
-                "https://via.placeholder.com/40/808080/FFFFFF?text=G"
-              }
-              alt="group avatar"
-              className="w-10 h-10 rounded-full object-cover border border-white/50"
-            />
-            <h3 className="text-lg font-semibold text-white/95">
-              {selectedGroup.name}
-            </h3>
-          </div>
-        )}
-
-        {/* Messages */}
-        <div className="flex-1 p-4 overflow-y-auto flex flex-col gap-4 custom-scrollbar">
-          {!selectedGroup && (
-            <div className="text-white/50 text-center my-auto text-xl">
-              Select a group to start chatting
+      {/* RIGHT CHAT AREA */}
+      <div className="flex-1 flex flex-col bg-gray-900/40">
+        {selectedGroup ? (
+          <>
+            {/* Header */}
+            <div className="p-4 border-b border-gray-700 flex items-center gap-3 bg-gray-800/40">
+              <img
+                src={
+                  selectedGroup.members[0]?.profileUrl ||
+                  "https://via.placeholder.com/40/808080/FFFFFF?text=G"
+                }
+                className="w-10 h-10 rounded-full border border-white/30"
+              />
+              <div>
+                <div className="font-semibold text-lg">
+                  {selectedGroup.room.roomName ||
+                    selectedGroup.members
+                      .map((m) => m.name || m.username)
+                      .join(", ")}
+                </div>
+                <div className="text-sm text-gray-400">
+                  {selectedGroup.members.length} members
+                </div>
+              </div>
             </div>
-          )}
-          {selectedGroup &&
-            messages.map((msg) => {
-              const isSender = msg.senderId === CURRENT_USER_ID;
-              const avatarUrl = msg.senderProfileUrl || "/defaultPfp.jpeg";
 
-              return (
-                <div
-                  key={msg.id || Math.random()}
-                  className={`flex ${
-                    isSender ? "justify-end" : "justify-start"
-                  }`}
-                >
-                  <div className="flex items-start gap-2 max-w-[80%]">
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
+              {selectedGroup.room.chats.length === 0 && (
+                <div className="text-gray-400 text-center mt-20">
+                  No messages yet
+                </div>
+              )}
+              {selectedGroup.room.chats.map((msg) => {
+                const isSender = msg.senderId === currentUserId;
+                const sender = selectedGroup.members.find(
+                  (m) => m.id === msg.senderId
+                );
+
+                return (
+                  <div
+                    key={msg.id}
+                    className={`flex ${
+                      isSender ? "justify-end" : "justify-start"
+                    }`}
+                  >
                     {!isSender && (
                       <img
-                        src={avatarUrl}
-                        alt="avatar"
-                        className="w-8 h-8 rounded-full object-cover border border-white/50 flex-shrink-0"
+                        src={
+                          sender?.profileUrl ||
+                          "https://via.placeholder.com/30/808080/FFFFFF?text=U"
+                        }
+                        className="w-8 h-8 rounded-full border border-white/30"
                       />
                     )}
                     <div
-                      className={`p-3 rounded-3xl shadow-xl text-gray-900 ${
+                      className={`max-w-[70%] px-3 py-2 rounded-2xl ${
                         isSender
-                          ? "bg-teal-400/80 rounded-br-md"
-                          : "bg-white/40 rounded-tl-md"
+                          ? "bg-teal-500/80 text-gray-900 rounded-br-sm"
+                          : "bg-gray-200/70 text-gray-900 rounded-tl-sm"
                       }`}
                     >
-                      <span>{msg.text}</span>
+                      {msg.text}
                     </div>
                     {isSender && (
                       <img
-                        src={avatarUrl}
-                        alt="my avatar"
-                        className="w-8 h-8 rounded-full object-cover border border-white/50 flex-shrink-0"
+                        src="/defaultPfp.jpeg"
+                        className="w-8 h-8 rounded-full border border-white/30"
                       />
                     )}
                   </div>
-                </div>
-              );
-            })}
-        </div>
+                );
+              })}
+            </div>
 
-        {/* Input Area */}
-        {selectedGroup && (
-          <div className="p-3 border-t border-white/30 bg-white/10 backdrop-blur-lg flex gap-3 rounded-b-2xl shadow-inner">
-            <input
-              type="text"
-              className="flex-1 p-3 rounded-full bg-white/20 backdrop-blur-md border border-white/30 text-white placeholder-white/70 focus:outline-none focus:ring-2 focus:ring-teal-400/80"
-              placeholder="Message..."
-              value={messageInput}
-              onChange={(e) => setMessageInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-            />
-            <button
-              onClick={sendMessage}
-              className="w-12 h-12 rounded-full bg-teal-500 hover:bg-teal-600 text-white font-bold transition flex items-center justify-center shadow-lg"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="24"
-                height="24"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="feather feather-send"
+            {/* Input */}
+            <div className="p-3 border-t border-gray-700 flex gap-2 bg-gray-800/40">
+              <input
+                type="text"
+                value={messageInput}
+                onChange={(e) => setMessageInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && sendMessage()}
+                placeholder="Type a message"
+                className="flex-1 p-2 rounded-full bg-gray-700/50 border border-gray-600 focus:outline-none text-white placeholder-gray-400"
+              />
+              <button
+                onClick={sendMessage}
+                className="bg-teal-500 hover:bg-teal-600 text-white px-4 rounded-full font-semibold"
               >
-                <line x1="22" y1="2" x2="11" y2="13"></line>
-                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-              </svg>
-            </button>
+                Send
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="flex items-center justify-center flex-1 text-gray-400 text-lg">
+            Select a group to start chatting
           </div>
         )}
       </div>

@@ -38,18 +38,40 @@ const sendMail_1 = require("./sendMail");
 const amqplib = __importStar(require("amqplib"));
 let connection;
 let channel;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 5;
 const start = async () => {
     try {
-        connection = await amqplib.connect(process.env.RABBIT_URL + "?heartbeat=60");
+        if (!process.env.RABBIT_URL) {
+            throw new Error("RABBIT_URL not configured");
+        }
+        connection = await amqplib.connect(process.env.RABBIT_URL);
         channel = await connection.createChannel();
+        reconnectAttempts = 0;
         console.log("RabbitMQ connected");
+        connection.on('error', (err) => {
+            console.error('[AMQP] Connection error:', err);
+            reconnect();
+        });
+        connection.on('close', () => {
+            console.error('[AMQP] Connection closed');
+            reconnect();
+        });
     }
     catch (err) {
-        console.error("[AMQP] Connection error:", err);
-        setTimeout(exports.start, 1000);
+        console.error("[AMQP] Initial connection error:", err);
+        reconnect();
     }
 };
 exports.start = start;
+const reconnect = () => {
+    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        console.error('[AMQP] Max reconnection attempts reached');
+        process.exit(1);
+    }
+    reconnectAttempts++;
+    setTimeout(exports.start, 1000 * reconnectAttempts);
+};
 const subscribeToQueue = async (queue) => {
     if (!channel)
         await (0, exports.start)();

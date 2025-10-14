@@ -1,4 +1,4 @@
-import prisma from "./prisma";
+import prisma from "../lib/prisma";
 
 export const getRooms = async (userId: string) => {
   console.log("running getRooms")
@@ -28,6 +28,7 @@ export const getRooms = async (userId: string) => {
     room: {
       id: room.id,
       createdById: room.createdById,
+      roomName:room.roomName,
       createdAt: room.createdAt,
       chats: room.chats, 
     },

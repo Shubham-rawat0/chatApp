@@ -10,10 +10,9 @@ import rateLimit from "express-rate-limit";
 
 const app = express();
 
-
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, 
-  max: 100, 
+  windowMs: 15 * 60 * 1000,
+  max: 100,
 });
 
 app.use(express.json());
@@ -26,7 +25,6 @@ app.use(
 app.use(limiter);
 app.use(clerkMiddleware());
 app.use("/user", userRoutes);
-
 
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   console.error(err.stack);
@@ -48,9 +46,11 @@ const io = new SocketIOServer(server, {
 //   res.send("hello")
 // })
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
+server
+  .listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);
-  }).on("error", (err) => {
+  })
+  .on("error", (err) => {
     console.error("Server failed to start:", err);
     process.exit(1);
   });

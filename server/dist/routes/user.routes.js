@@ -7,7 +7,7 @@ const express_1 = __importDefault(require("express"));
 const router = express_1.default.Router();
 const user_controllers_1 = require("../controllers/user.controllers");
 const express_2 = require("@clerk/express");
-router.get("/account", (0, express_2.requireAuth)(), user_controllers_1.createOrUpdateUser);
+router.get("/account", (0, express_2.requireAuth)(), user_controllers_1.getOrCreateUser);
 router.post("/addfriend", (0, express_2.requireAuth)(), user_controllers_1.addFriend);
 router.patch("/acceptfriend", (0, express_2.requireAuth)(), user_controllers_1.acceptRequest);
 router.patch("/rejectfriend", (0, express_2.requireAuth)(), user_controllers_1.denyRequest);
