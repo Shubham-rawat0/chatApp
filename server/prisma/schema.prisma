@@ -1,0 +1,85 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String       @id @default(uuid())
+  name             String
+  email            String       @unique
+  firstName        String
+  lastName         String
+  lastActive       DateTime
+  registrationDate DateTime
+  profileUrl  String @default("data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEAAkGBwgHBgkIBwgKCgkLDRYPDQwMDRsUFRAWIB0iIiAdHx8kKDQsJCYxJx8fLT0tMTU3Ojo6Iys/RD84QzQ5OjcBCgoKDQwNGg8PGjclHyU3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3N//AABEIAJQArwMBIgACEQEDEQH/xAAbAAEAAgIDAAAAAAAAAAAAAAAABgcEBQECA//EADkQAAICAQICBggEBAcAAAAAAAABAgMEBREGQRIhIjFRYRMyM0JxkbHBI4Gh0VNz4fAUJDVDUmJy/8QAFgEBAQEAAAAAAAAAAAAAAAAAAAEC/8QAFxEBAQEBAAAAAAAAAAAAAAAAAAEhEf/aAAwDAQACEQMRAD8AtIAGmQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPLKyaMSv0uVbGqHJze25rte1qvSqFslPImvw4fd+X1IDmZmRm5DvyrZWWPx7l8PAomt3FumVvaHp7fOEOr9djvj8VaXdJRlK2lvnZDq/TcgAB1bFNtd9cbKbIWQl3Sg90zuVfpuo5Om3elxp7b+tB+rJeDRYWkanTqmL6anqkvaQb64MDOABAAAAAAAAAAAAAAAAAPLJvhi49uRa9q6oucn5I9SPcbZDq0qFMX7a1J/BdYENz8y3Py7Mm99ub6l4LkvyMcAsQABQM/RNSlpefC/r9E+zbHxj/AH1mACUW0mmk4vdNbpo5NVwvkPJ0THlJ9qC9G9/J7fTY2pFAAAAAAAAAAAAAAAACKce+xwny6c/oiVkd44pdml1WJeztT+e6/YCDAAsQABQABKJ5wT/or/nS+xvzUcK0unQsfpLZz3n82zbkUAAAAAAAAAAAAAAAAMbUcWOdgX4s9vxINJvk+T+ZkgCp7qp0Wypti42Qe0l5nQnnEfD61HfJxWo5SXaT7rF8fEhGTj3Ytrryap1TXKa2+RYjyABQMjAxLM/MqxafXsfft6q5sYWFk51qrxaZ2Pm0uyl5vuRPOH9EhpNLlNqzJsXblyS8ESjaVVwqqhVWujCEVGK8EjuARQAAAAAAAAAAAAAAAAAADzuoqvg4XVQsj4SjuYOfrmn4Dcb71Kxf7dS6UjSZHGa7sbCe3jbP7IDc2cPaTZLd4UF/5bj9DmrQNJqe8cKtv/tvL6kZlxhqDfZpx4rzi39zmHGOen2qKJfDdAxNq64VRUKoKEV3RitkdiK4/GdTaWVhzj4yql0v0exvMDV8HUGljZEZT/4S7MvkyjOABAAAAAAAAAAAAAAADC1fU6dLxHdb2pN7V1r35fsB21HUMbTaPTZViin1RivWk/JEI1fiLM1BuEN8fH5Qg+t/F8zXZ+bfqGRK/Js6Un3Jd0V4JGOUp3cgAVAAAAABINH4nycRxrzOlk0d3Sb7cV5Pn+ZNcTKpzaI341kZ1vmuT8H5lVGdpOqX6Vk+loe8H7Stvqmv38yKs0GPg5lOfiwycZ7wny5xfNMyCAAAAAAAAAAAOtlkKq52WNKEE5Sb5Jd5WutalPVM2V0m1WuquD92P9eZJuNs904teFCXau7U9n7q/d/QhRQABUAAAAAAAAAABuOGdWemZqjZP/LWvo2J90Xyl/fIsMqQsHhLPeZpUYTlvbj7Vy3fW1yf2/IixugARQABAAAADhy6Kcn7q3KK44lyv8VreTL3a2q4/CP9dzWHMpuyTsl1yk3Jv4nAQABQAAAAAAAAAAA3/BeV6HVnT7t8Oj+a619zQGXpFro1bDmur8aCfwbSZBaAACgAIAAAHjlvbEva/hS+gBRVMfVRyAVkAAUAAAAAAAAAAA9MZ7ZVDX8WP1QARbD72cAEaAAQf//Z")
+  clerkId      String  @unique
+  Bio           String  @default("Hey! Drop a message")
+
+  sentFriendRequests     Friends[] @relation("FriendRequestsSent")
+  receivedFriendRequests Friends[] @relation("FriendRequestsReceived")
+  rooms            Room[]       
+  chatsSent        Chat[]       @relation("ChatsSent")
+  chatsReceived    Chat[]       @relation("ChatsReceived")
+  roomMembers      RoomMember[]
+}
+
+model Room {
+  id           String        @id @default(uuid())
+  createdById  String
+  createdAt    DateTime      @default(now())
+  roomName  String
+  createdBy    User          @relation(fields: [createdById], references: [id])
+  chats        Chat[]
+  members      RoomMember[]
+}
+
+model RoomMember {
+  id       String @id @default(uuid())
+  roomId   String
+  userId   String
+
+  user     User   @relation(fields: [userId], references: [id])
+  room     Room   @relation(fields: [roomId], references: [id])
+   @@unique([roomId, userId])
+}
+
+model Chat {
+  id          String   @id @default(uuid())
+  senderId    String
+  receiverId  String
+  roomId      String
+  message     String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  sender      User     @relation("ChatsSent", fields: [senderId], references: [id])
+  receiver    User     @relation("ChatsReceived", fields: [receiverId], references: [id])
+  room        Room     @relation(fields: [roomId], references: [id])
+  
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([roomId])
+}
+
+model Friends {
+  id           String            @id @default(uuid())
+  requesterId  String
+  accepterId   String
+  status       FriendshipStatus  @default(PENDING)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  requester    User @relation("FriendRequestsSent", fields: [requesterId], references: [id])
+  accepter     User @relation("FriendRequestsReceived", fields: [accepterId], references: [id])
+
+  @@unique([requesterId, accepterId])
+}
+enum FriendshipStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  BLOCKED
+}
