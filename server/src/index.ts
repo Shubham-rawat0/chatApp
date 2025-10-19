@@ -36,15 +36,13 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
 
 const server = http.createServer(app);
 
-const io = new SocketIOServer(server, {
+export const io = new SocketIOServer(server, {
   cors: {
     origin: process.env.CLIENT_URL || "http://localhost:5173",
     credentials: true,
   },
 });
-// app.get("/",(req:Request,res:Response)=>{
-//   res.send("hello")
-// })
+import "./websockets/socket";
 const PORT = process.env.PORT || 3000;
 server
   .listen(PORT, () => {

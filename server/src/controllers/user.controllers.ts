@@ -22,7 +22,7 @@ const getCurrentUser = async (req: Request) => {
       console.log(" token", token);
     }
     const { userId } = getAuth(req);
-    console.log("user id",userId)
+    console.log("user id", userId);
     if (!userId) {
       const error = new Error("User not authenticated") as AuthError;
       error.statusCode = 401;
@@ -52,23 +52,22 @@ const getCurrentUser = async (req: Request) => {
 
 export const getOrCreateUser = async (req: Request, res: Response) => {
   try {
-    const token=req.headers.authorization?.split(" ")[1]
-    if(!token){
-      console.log("no token")
-    }
-    else{
-      console.log(" token",token);
+    const token = req.headers.authorization?.split(" ")[1];
+    if (!token) {
+      console.log("no token");
+    } else {
+      console.log(" token", token);
     }
     const { userId } = getAuth(req);
     if (!userId) throw new Error("User not authenticated");
-
-    const key = redisProfileKey(userId);
+    const currentUser = await getCurrentUser(req);
+    const key = redisProfileKey(currentUser.id);
     const cachedData = await redis.hGetAll(key);
 
     if (Object.keys(cachedData).length > 0) {
       const user = JSON.parse(cachedData.user);
       const friends = JSON.parse(cachedData.friends);
-      console.log("fetching from redis",cachedData)
+      console.log("fetching from redis", cachedData);
       return res.status(200).json({
         friends,
         user,
@@ -109,16 +108,14 @@ export const getOrCreateUser = async (req: Request, res: Response) => {
 
     const friends = await getFriends(user.id);
 
-    const redisData=await redis.hSet(key, {
+    const redisData = await redis.hSet(key, {
       user: JSON.stringify(user),
-      friends: JSON.stringify(friends)
+      friends: JSON.stringify(friends),
     });
-    console.log("redis data set",redisData)
+    console.log("redis data set", redisData);
     await redis.expire(key, 36000);
 
-    return res
-      .status(200)
-      .json({ message: "User synced", user, friends});
+    return res.status(200).json({ message: "User synced", user, friends });
   } catch (error) {
     const err = error as AuthError;
     console.error("Error in createOrUpdateUser:", err);
@@ -181,6 +178,7 @@ export const acceptRequest = async (req: Request, res: Response) => {
   try {
     const currentUser = await getCurrentUser(req);
     const { friendrequestId } = req.body;
+
     if (!friendrequestId)
       return res
         .status(400)
@@ -203,9 +201,32 @@ export const acceptRequest = async (req: Request, res: Response) => {
       data: { status: "ACCEPTED" },
     });
 
-    return res
-      .status(200)
-      .json({ message: "Friend request accepted", friend: updatedRequest });
+    const friendsAccepter = await getFriends(currentUser.id);
+    const accepterKey = redisProfileKey(currentUser.id);
+    await redis.hSet(accepterKey, {
+      user: JSON.stringify(currentUser),
+      friends: JSON.stringify(friendsAccepter),
+    });
+    await redis.expire(accepterKey, 36000);
+
+    const requester = await prisma.user.findUnique({
+      where: { id: friendRequest.requesterId },
+    });
+    if (requester) {
+      const friendsRequester = await getFriends(requester.id);
+      const requesterKey = redisProfileKey(requester.id);
+      await redis.hSet(requesterKey, {
+        user: JSON.stringify(requester),
+        friends: JSON.stringify(friendsRequester),
+      });
+      await redis.expire(requesterKey, 36000);
+    }
+
+    return res.status(200).json({
+      message: "Friend request accepted",
+      user: currentUser,
+      friends: friendsAccepter,
+    });
   } catch (error) {
     console.error("Error in acceptRequest:", error);
     return res.status(500).json({ message: "Server error" });
@@ -237,9 +258,11 @@ export const denyRequest = async (req: Request, res: Response) => {
       data: { status: "REJECTED" },
     });
 
-    return res
-      .status(200)
-      .json({ message: "Friend request denied", friend: updatedRequest });
+    return res.status(200).json({
+      message: "Friend request denied",
+      user: currentUser,
+      friends: updatedRequest,
+    });
   } catch (error) {
     console.error("Error in denyRequest:", error);
     return res.status(500).json({ message: "Server error" });
@@ -295,99 +318,121 @@ export const getGroupData = async (req: Request, res: Response) => {
   try {
     const currentUser = await getCurrentUser(req);
     const key = redisGroupKey(currentUser.id);
-    const cachedData = await redis.hGetAll(key);
-    if (Object.keys(cachedData).length > 0) {
-      const groups = JSON.parse(cachedData.groups);
-      console.log("user groups fetched from Redis",groups);
-      return res
-        .status(200)
-        .json({ message: "user groups fetched from Redis", groups });
+    try {
+      const cachedData = await redis.get(key);
+      if (cachedData) {
+        const groups = JSON.parse(cachedData);
+        console.log(
+          "Groups fetched from Redis for current user",
+          currentUser.name
+        );
+        return res.status(200).json({
+          message: "Groups fetched from Redis",
+          groups,
+        });
+      }
+    } catch (err) {
+      console.log("Cache miss or parse error");
     }
 
+    console.log("Fetching fresh groups for user", currentUser.name);
     const groups = await getRooms(currentUser.id);
 
-    const redisData=await redis.hSet(key, { groups: JSON.stringify(groups) });
-    await redis.expire(key, 3600); 
-    console.log("groups set to rediss",redisData)
-    return res.status(200).json({ message: "user groups fetched", groups });
+    try {
+      await redis.set(key, JSON.stringify(groups));
+      await redis.expire(key, 3600);
+    } catch (err) {
+      console.log("Error setting cache:", err);
+    }
+
+    return res.status(200).json({
+      message: "Groups fetched from database",
+      groups,
+    });
   } catch (error) {
     console.error("Error in getGroupData:", error);
     return res.status(500).json({ message: "Server error" });
   }
 };
 
-
 export const createRoom = async (req: Request, res: Response) => {
   try {
     const { roomName } = req.body;
     const currentUser = await getCurrentUser(req);
     const key = redisGroupKey(currentUser.id);
-  const newRoom = await prisma.room.create({
-    data: {
-      createdById: currentUser?.id,
-      roomName: roomName,
-      members: {
-        create: {
-          userId: currentUser.id,
+
+    const newRoom = await prisma.room.create({
+      data: {
+        createdById: currentUser?.id,
+        roomName: roomName,
+        members: {
+          create: {
+            userId: currentUser.id,
+          },
         },
       },
-    },
-  });
-    console.log("new room created",newRoom)
+    });
+    console.log("new room created", newRoom);
+
     const groups = await getRooms(currentUser.id);
-    const redisData = await redis.hSet(key, { groups: JSON.stringify(groups) });
+
+    // Clear existing cache and set new data
+    await redis.del(key);
+    await redis.set(key, JSON.stringify(groups));
     await redis.expire(key, 3600);
-    console.log("updated groups set to rediss", redisData);
+
+    console.log("Updated groups cache for user", currentUser.id);
     res.status(200).json({ groups });
   } catch (error) {
-    console.error("Error in blockUser:", error);
+    console.error("Error in createRoom:", error);
     return res.status(500).json({ message: "Server error" });
   }
 };
 
 export const addToGroup = async (req: Request, res: Response) => {
   try {
-    console.log("starting addToGroup")
+    console.log("starting addToGroup");
     const { roomId, email } = req.body;
     const currentUser = await getCurrentUser(req);
-    const room = await prisma.room.findUnique({
-      where: { id: roomId },
-    });
+
+    const room = await prisma.room.findUnique({ where: { id: roomId } });
     if (!room) return res.status(404).json({ message: "Room not found" });
-    console.log("room found")
+    console.log("room found");
+
     if (room.createdById !== currentUser.id)
       return res.status(403).json({ message: "You are not the group creator" });
-    console.log("finding friend")
-    const friend=await prisma.user.findUnique({where:{
-      email
-    }})
-    if(!friend){
-      return res.status(401).json({message:"user not registered"})
-    }
-    console.log("friend found",friend)
+
+    console.log("finding friend");
+    const friend = await prisma.user.findUnique({ where: { email } });
+    if (!friend)
+      return res.status(401).json({ message: "User not registered" });
+
+    console.log("friend found", friend);
     const existingMember = await prisma.roomMember.findUnique({
-      where: { roomId_userId: { roomId, userId:friend.id } },
+      where: { roomId_userId: { roomId, userId: friend.id } },
     });
     if (existingMember)
       return res.status(400).json({ message: "User already in group" });
 
     await prisma.roomMember.create({
-      data: {
-        roomId,
-        userId:friend.id,
-      },
+      data: { roomId, userId: friend.id },
     });
-    console.log("added to group")
-      const key = redisGroupKey(currentUser.id);
-      const groups = await getRooms(currentUser.id);
-      const redisData = await redis.hSet(key, {
-        groups: JSON.stringify(groups),
-      });
+    console.log("added to group");
+
+    const groups = await getRooms(currentUser.id);
+    const allMembers = await prisma.roomMember.findMany({
+      where: { roomId },
+      select: { userId: true },
+    });
+
+    for (const member of allMembers) {
+      const key = redisGroupKey(member.userId);
+      await redis.hSet(key, { groups: JSON.stringify(groups) });
       await redis.expire(key, 3600);
-      console.log("updated groups set to rediss", redisData);
-    res
-      .status(200)
-      .json({ message: "User added to group",groups});
+    }
+
+    console.log("updated groups set to redis");
+    res.status(200).json({ message: "User added to group", groups });
   } catch (error) {
     console.error("Error in addToGroup:", error);
     res.status(500).json({ message: "Server error" });
@@ -400,13 +445,13 @@ export const joinGroup = async (req: Request, res: Response) => {
     const currentUser = await getCurrentUser(req);
 
     const user = await prisma.user.findUnique({
-      where: { clerkId: currentUser.id },
+      where: { id: currentUser.id },
     });
     if (!user) return res.status(404).json({ message: "User not found" });
+
     const room = roomId
       ? await prisma.room.findUnique({ where: { id: roomId } })
       : await prisma.room.findFirst({ where: { roomName } });
-
     if (!room) return res.status(404).json({ message: "Group not found" });
 
     const existing = await prisma.roomMember.findUnique({
@@ -416,20 +461,23 @@ export const joinGroup = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "You are already in this group" });
 
     await prisma.roomMember.create({
-      data: {
-        roomId: room.id,
-        userId: user.id,
-      },
+      data: { roomId: room.id, userId: user.id },
     });
 
-    const groups = await prisma.room.findMany({
-      where: {
-        members: { some: { userId: user.id } },
-      },
-      include: { members: { include: { user: true } } },
+    const groups = await getRooms(currentUser.id);
+    const allMembers = await prisma.roomMember.findMany({
+      where: { roomId: room.id },
+      select: { userId: true },
     });
 
-    res.status(200).json({ message: "Joined group successfully", groups });
+    for (const member of allMembers) {
+      const key = redisGroupKey(member.userId);
+      await redis.hSet(key, { groups: JSON.stringify(groups) });
+      await redis.expire(key, 3600);
+    }
+
+    console.log("updated groups set to redis");
+    res.status(200).json({ message: "User added to group", groups });
   } catch (error) {
     console.error("Error in joinGroup:", error);
     res.status(500).json({ message: "Server error" });
@@ -468,18 +516,77 @@ export const updateUser = async (req: Request, res: Response) => {
       },
     });
     const key = redisProfileKey(userId);
-   
-     const redisData = await redis.hSet(key, { user: JSON.stringify(updatedUser) });
+
+    const redisData = await redis.hSet(key, {
+      user: JSON.stringify(updatedUser),
+    });
     console.log("redis data set", redisData);
     await redis.expire(key, 36000);
-    
 
     return res.status(200).json({
       message: "User profile updated successfully",
-      user: updateUser
+      user: updatedUser,
     });
   } catch (error) {
     console.error("Error in updateUser:", error);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const getUserId = async (req: Request, res: Response) => {
+  try {
+    const currentUser = await getCurrentUser(req);
+    res.status(200).json({ currentUser });
+  } catch (error) {
+    console.log(error);
+  }
+};
+export const userFriends = async (req: Request, res: Response) => {
+  try {
+    const currentUser = await getCurrentUser(req);
+    const friends = await prisma.friends.findMany({
+      where: {
+        OR: [
+          { accepterId: currentUser.id, status: "ACCEPTED" },
+          { requesterId: currentUser.id, status: "ACCEPTED" },
+        ],
+      },
+      include: {
+        accepter: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            profileUrl: true,
+            clerkId: true,
+          },
+        },
+        requester: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            profileUrl: true,
+            clerkId: true,
+          },
+        },
+      },
+    });
+
+    const friendsOfUser = friends.map((f) => {
+      const friend = f.accepterId === currentUser.id ? f.requester : f.accepter;
+      return {
+        id: friend.id,
+        name: friend.name,
+        email: friend.email,
+        profileUrl: friend.profileUrl,
+        username: friend.clerkId,
+      };
+    });
+
+    return res.status(200).json({ friends: friendsOfUser });
+  } catch (error) {
+    console.error("Error in userFriends:", error);
     return res.status(500).json({ message: "Server error" });
   }
 };

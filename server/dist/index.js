@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.io = void 0;
 const express_1 = __importDefault(require("express"));
 const dotenv_1 = __importDefault(require("dotenv"));
 dotenv_1.default.config();
@@ -33,15 +34,13 @@ app.use((err, req, res, next) => {
     });
 });
 const server = http_1.default.createServer(app);
-const io = new socket_io_1.Server(server, {
+exports.io = new socket_io_1.Server(server, {
     cors: {
         origin: process.env.CLIENT_URL || "http://localhost:5173",
         credentials: true,
     },
 });
-// app.get("/",(req:Request,res:Response)=>{
-//   res.send("hello")
-// })
+require("./websockets/socket");
 const PORT = process.env.PORT || 3000;
 server
     .listen(PORT, () => {

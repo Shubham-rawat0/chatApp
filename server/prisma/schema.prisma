@@ -50,15 +50,15 @@ model RoomMember {
 model Chat {
   id          String   @id @default(uuid())
   senderId    String
-  receiverId  String
-  roomId      String
+  receiverId  String?
+  roomId      String?
   message     String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   sender      User     @relation("ChatsSent", fields: [senderId], references: [id])
-  receiver    User     @relation("ChatsReceived", fields: [receiverId], references: [id])
-  room        Room     @relation(fields: [roomId], references: [id])
+  receiver    User?     @relation("ChatsReceived", fields: [receiverId], references: [id])
+  room        Room?    @relation(fields: [roomId], references: [id])
   
   @@index([senderId])
   @@index([receiverId])

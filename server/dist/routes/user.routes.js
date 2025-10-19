@@ -15,5 +15,7 @@ router.post("/blockfriend", (0, express_2.requireAuth)(), user_controllers_1.blo
 router.get("/getGroups", (0, express_2.requireAuth)(), user_controllers_1.getGroupData);
 router.post("/createGroup", (0, express_2.requireAuth)(), user_controllers_1.createRoom);
 router.patch("/addToGroup", (0, express_2.requireAuth)(), user_controllers_1.addToGroup);
-router.post("/addToGroup", (0, express_2.requireAuth)(), user_controllers_1.joinGroup);
+router.post("/joinGroup", (0, express_2.requireAuth)(), user_controllers_1.joinGroup);
+router.get("/currentUser", (0, express_2.requireAuth)(), user_controllers_1.getUserId);
+router.get("/friendsOfUser", (0, express_2.requireAuth)(), user_controllers_1.userFriends);
 exports.default = router;
